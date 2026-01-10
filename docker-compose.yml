@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:17.7-alpine3.23
+    container_name: auth_db_container
+    restart: always
+    ports:
+      - '${DB_PORT}:5432'
+
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    
+    shm_size: 128mb
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+    command: >
+      postgres 
+      -c shared_buffers=256MB 
+      -c max_connections=200
+      -c log_min_duration_statement=1000
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

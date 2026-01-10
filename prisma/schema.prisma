@@ -1,0 +1,221 @@
+// --------------------------------------------------------
+// 1. CONFIGURACIÓN DEL CLIENTE (Runtime)
+// --------------------------------------------------------
+generator client {
+  provider      = "prisma-client-js"
+  // binaryTargets: Define para qué Sistemas Operativos se compilará el motor de Rust.
+  // "native": Para que funcione en tu máquina actual (Mac M4).
+  // "linux-musl...": Para que funcione dentro de Docker (Alpine Linux) en producción.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+// --------------------------------------------------------
+// 2. CONFIGURACIÓN DE CONEXIÓN (Infraestructura)
+// --------------------------------------------------------
+datasource db {
+  provider = "postgresql"
+  // NOTA: No hay 'url' aquí porque usamos prisma.config.ts (Prisma 7 style).
+  // Esto desacopla la definición del esquema de la conexión física.
+}
+
+// --------------------------------------------------------
+// 3. ENUMS (Integridad de Datos)
+// --------------------------------------------------------
+// Restringe los valores posibles a nivel de base de datos.
+// Ahorra espacio vs guardar strings repetidos ("GOOGLE", "GOOGLE"...)
+enum AuthProvider {
+  GOOGLE
+  APPLE
+  //FACEBOOK
+}
+
+enum Role {
+  USER
+  ADMIN
+  SUPPORT
+}
+
+// --------------------------------------------------------
+// 4. MODELO USER (La Identidad Central)
+// --------------------------------------------------------
+model User {
+  // ID (Primary Key):
+  // - Tipo: UUID (128 bits).
+  // - Generación: MANUAL desde el código (NestJS) usando librería 'uuidv7'.
+  // - Por qué UUIDv7?: A diferencia de v4 (random), v7 es secuencial por tiempo.
+  //   Esto evita la "fragmentación de índices" en Postgres, haciendo que las
+  //   inserciones sean rápidas aunque tengas millones de usuarios.
+  id            String    @id @db.Uuid
+
+  // EMAIL:
+  // - @unique: Crea implícitamente un índice B-Tree único.
+  // - @db.VarChar(255): Optimización de almacenamiento vs 'Text'.
+  email         String    @unique @db.VarChar(255)
+
+  // EMAIL VERIFIED:
+  // - Seguridad: Crítico para evitar "Account Takeover".
+  // - Lógica: Si es NULL, el usuario no ha confirmado su email.
+  //   Si entra con Google, esto se llena automáticamente.
+  emailVerified DateTime? @map("email_verified")
+
+  // PERFIL (Datos Personales):
+  // - Separados para coincidir con la data que envían Google/Apple (Given/Family name).
+  firstName     String?   @db.VarChar(100)
+  lastName      String?   @db.VarChar(100)
+  picture       String?   @db.VarChar(255)
+  
+  // ROLES Y ESTADO:
+  role          Role      @default(USER)
+  
+  // Kill-Switch: Si false, el Guard rechaza cualquier request (Baneo rápido).
+  isActive      Boolean   @default(true)
+  
+  // SOFT DELETE (Auditoría):
+  // - En lugar de borrar la fila (DELETE), ponemos una fecha aquí.
+  // - Permite restaurar cuentas borradas por error y mantiene integridad referencial.
+  deletedAt     DateTime? @map("deleted_at") 
+  
+  // METRICAS:
+  // - Saber cuándo entró por última vez sin hacer JOINs costosos con tablas de logs.
+  lastLogin     DateTime? @map("last_login")
+
+  // RELACIONES (Prisma Level):
+  accounts      Account[]
+  refreshTokens RefreshToken[]
+  // La seguridad está separada. Si traes el User, NO traes sus secretos por defecto.
+  security      UserSecurity?
+
+  // TIMESTAMPS:
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Mapeo a nombre de tabla SQL estándar (snake_case + plural)
+  @@map("users")
+}
+
+model UserSecurity {
+  id              String    @id @db.Uuid
+
+  userId            String    @unique @map("user_id") @db.Uuid
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // TWO FACTOR AUTH (2FA):
+  // - Secret: La semilla para generar códigos (Google Authenticator).
+  // - RecoveryCodes: Array nativo de Postgres (String[]).
+  //   IMPORTANTE: Guardar estos códigos hasheados (bcrypt) en producción.
+  twoFactorSecret   String?   @map("two_factor_secret") @db.VarChar(100)
+  twoFactorEnabled  Boolean   @default(false) @map("two_factor_enabled")
+  twoFactorRecoveryCodes String[] @map("two_factor_recovery_codes")
+  // PASSWORD:
+  // - Nullable (?): Permite usuarios que SOLO entran con Google/Apple.
+  // - Lógica: Si tiene valor, el usuario puede hacer login local.
+  password      String?   @db.VarChar(255)
+  
+  // ZOMBIE KILLER (Seguridad):
+  // - Qué es: Fecha en que se cambió la contraseña por última vez.
+  // - Uso: Al validar un token, comparamos: Token.createdAt > User.passwordChangedAt.
+  // - Efecto: Si cambias tu password, invalidas INSTANTÁNEAMENTE todos los tokens viejos
+  //   en todos los dispositivos, expulsando a posibles hackers.
+  passwordChangedAt DateTime? @map("password_changed_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("user_security")
+}
+// --------------------------------------------------------
+// 5. MODELO ACCOUNT (Vinculaciones OAuth)
+// --------------------------------------------------------
+// Propósito: Separar "Quién eres" (User) de "Cómo entras" (Credentials).
+// Permite que un mismo User tenga Google Y Apple vinculados.
+model Account {
+  id                String       @id @db.Uuid
+  
+  // Foreign Key al User
+  userId            String       @map("user_id") @db.Uuid
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Qué proveedor es (Ej: GOOGLE)
+  provider          AuthProvider 
+  
+  // El ID único que TE DA Google/Apple (Ej: "1122334455").
+  // No es nuestro ID, es el de ellos.
+  providerAccountId String       @map("provider_account_id") @db.VarChar(255)
+
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  // REGLA DE ORO (Integridad):
+  // Impide que dos usuarios diferentes vinculen la misma cuenta de Google.
+  // Un par Provider + ProviderID debe ser único en todo el sistema.
+  @@unique([provider, providerAccountId]) 
+  
+  // INDICE DE BUSQUEDA (Performance):
+  // Cuando el usuario entra, buscamos sus cuentas vinculadas.
+  // Ayuda al JOIN con la tabla User.
+  @@index([userId])
+
+  @@map("accounts")
+}
+
+// --------------------------------------------------------
+// 6. MODELO REFRESH TOKEN (Sesiones y Seguridad)
+// --------------------------------------------------------
+// Propósito: Manejar sesiones largas (7 días) de forma segura y revocable.
+// Esta es la tabla de mayor tráfico (High Churn).
+model RefreshToken {
+  id          String   @id @db.Uuid
+  
+  // TOKEN HASH (Seguridad):
+  // - NUNCA guardamos el token plano. Si roban la DB, no pueden usar las sesiones.
+  // - Limitado a 512 chars para prevenir ataques de DoS por inserción gigante.
+  tokenHash   String   @map("token_hash") @db.VarChar(512)
+
+  // DUEÑO DEL TOKEN:
+  userId      String   @map("user_id") @db.Uuid
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // FAMILY ID (Detección de Robo):
+  // - Concepto: Todos los tokens derivados de un login original comparten ID.
+  // - Uso: Si un hacker usa un token viejo de la familia X, borramos
+  //   TODOS los tokens con familyId=X. Alerta de seguridad proactiva.
+  familyId    String   @map("family_id") @db.Uuid
+
+  // AUDITORIA / UX:
+  // - Para mostrar en el dashboard: "Chrome en Windows 10".
+  deviceInfo  String?  @map("device_info") @db.VarChar(500)
+  ipAddress   String?  @map("ip_address") @db.VarChar(45)
+
+  // EXPIRACION:
+  // - Fecha absoluta de muerte del token. Usada por Cron Jobs de limpieza.
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // --- PERFORMANCE TUNING (INGENIERIA DE INDICES) ---
+  
+  // 1. INDICE BASICO:
+  // - Para: "Mostrar mis sesiones activas".
+  // - Sin esto: Postgres hace Scan secuencial (lento).
+  @@index([userId]) 
+  
+  // 2. COVERING INDEX (OPTIMIZACIÓN EXTREMA):
+  // - Para: Validar token en cada refresh.
+  // - Query: SELECT userId FROM RefreshToken WHERE tokenHash = ?
+  // - Magia: Al incluir 'userId' en el índice, Postgres encuentra el hash 
+  //   y ahí mismo tiene el dato que necesita. 
+  // - Resultado: "Index Only Scan". NO LEE LA TABLA DEL DISCO.
+  //   Es 10x más rápido que un índice normal.
+  @@index([tokenHash, userId]) 
+  
+  // 3. COVERING INDEX PARA FAMILIA (SEGURIDAD):
+  // - Para: Invalidar familia cuando se detecta robo.
+  // - Query: DELETE FROM RefreshToken WHERE familyId = ? AND userId = ?
+  // - Mismo principio: Encuentra todos los tokens de la familia sin tocar la tabla
+  //   hasta el momento de borrarlos.
+  @@index([familyId, userId])
+  
+  // 4. INDICE DE LIMPIEZA:
+  // - Para: Cron Job nocturno (DELETE WHERE expiresAt < NOW()).
+  // - Sin esto: La DB tiene que revisar cada fila una por una para ver si expiró.
+  // - Con esto: Va directo a las viejas y las borra en milisegundos.
+  @@index([expiresAt]) 
+  
+  @@map("refresh_tokens")
+}
