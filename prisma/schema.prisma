@@ -14,6 +14,7 @@ generator client {
 // --------------------------------------------------------
 datasource db {
   provider = "postgresql"
+  
   // NOTA: No hay 'url' aquí porque usamos prisma.config.ts (Prisma 7 style).
   // Esto desacopla la definición del esquema de la conexión física.
 }
