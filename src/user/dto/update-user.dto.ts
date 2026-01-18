@@ -2,10 +2,9 @@ import { OmitType, PartialType } from '@nestjs/mapped-types';
 import { CreateUserDto } from './create-user.dto';
 import { AtLeastOneField } from '../../common/validators/at-least-one-field.validator';
 
-export class UpdateUserDto extends PartialType(
-  // Omitimos el email porque suele ser la identidad primaria y no se cambia así nomás
-  OmitType(CreateUserDto, ['email'] as const),
-) {
+class OmitUpdateUserDto extends OmitType(CreateUserDto, ['email'] as const) {}
+
+export class UpdateUserDto extends PartialType(OmitUpdateUserDto) {
   @AtLeastOneField(['firstName', 'lastName', 'picture', 'role'], {
     message:
       'Debe proporcionar al menos un campo para actualizar (nombre, apellido, foto o rol).',
