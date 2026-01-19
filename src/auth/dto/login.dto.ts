@@ -9,7 +9,7 @@ import { Transform } from 'class-transformer';
 
 export class LoginDto {
   @IsEmail({}, { message: 'Formato de email inválido' })
-  @MaxLength(255, { message: 'El email es demasiado largo' })
+  @MaxLength(128, { message: 'El email es demasiado largo' })
   @Transform(({ value }: { value: string }) => value?.trim().toLowerCase())
   @IsNotEmpty({ message: 'El email es requerido' })
   email: string;
