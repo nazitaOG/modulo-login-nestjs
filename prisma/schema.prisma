@@ -120,7 +120,7 @@ model UserSecurity {
   // PASSWORD:
   // - Nullable (?): Permite usuarios que SOLO entran con Google/Apple.
   // - Lógica: Si tiene valor, el usuario puede hacer login local.
-  password      String?   @db.VarChar(128)
+  password      String?   @db.VarChar(64)
   
   // ZOMBIE KILLER (Seguridad):
   // - Qué es: Fecha en que se cambió la contraseña por última vez.
