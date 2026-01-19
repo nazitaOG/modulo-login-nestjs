@@ -13,7 +13,12 @@ export class UserService {
 
   // Búsqueda por ID (Usado por el Controller y Guards)
   async findOneById(id: string): Promise<User> {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: {
+        roles: true,
+      },
+    });
     if (!user)
       throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
     return user;
@@ -21,7 +26,12 @@ export class UserService {
 
   // Búsqueda por Email (Usado para chequeos de identidad)
   async findOneByEmail(email: string): Promise<User> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      include: {
+        roles: true,
+      },
+    });
     if (!user)
       throw new NotFoundException(`Usuario con email ${email} no encontrado`);
     return user;
