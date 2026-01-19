@@ -16,6 +16,6 @@ export class LoginDto {
 
   @IsString()
   @MinLength(1, { message: 'La contraseña es requerida' })
-  @MaxLength(255, { message: 'La contraseña es demasiado larga' })
+  @MaxLength(64, { message: 'La contraseña es demasiado larga' })
   password: string;
 }
