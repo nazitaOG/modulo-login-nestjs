@@ -4,8 +4,8 @@ export interface JwtPayload {
   sub: string; // Subject (User ID - UUIDv7)
   email: string; // Email
   roles: string[]; // Role
-  iat: number; // Issued At (timestamp)
-  exp: number; // Expiration Time (timestamp)
+  iat?: number; // Issued At (timestamp)
+  exp?: number; // Expiration Time (timestamp)
 }
 
 export interface AuthResponse {
