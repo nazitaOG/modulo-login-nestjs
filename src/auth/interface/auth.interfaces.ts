@@ -3,7 +3,7 @@ import { User } from '@prisma/client';
 export interface JwtPayload {
   sub: string; // Subject (User ID - UUIDv7)
   email: string; // Email
-  role: string; // Role
+  roles: string[]; // Role
   iat: number; // Issued At (timestamp)
   exp: number; // Expiration Time (timestamp)
 }
