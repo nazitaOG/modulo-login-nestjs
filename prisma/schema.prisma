@@ -29,13 +29,6 @@ enum AuthProvider {
   APPLE
   //FACEBOOK
 }
-
-enum Role {
-  USER
-  ADMIN
-  SUPPORT
-}
-
 // --------------------------------------------------------
 // 4. MODELO USER (La Identidad Central)
 // --------------------------------------------------------
@@ -51,7 +44,7 @@ model User {
   // EMAIL:
   // - @unique: Crea implícitamente un índice B-Tree único.
   // - @db.VarChar(255): Optimización de almacenamiento vs 'Text'.
-  email         String    @unique @db.VarChar(255)
+  email         String    @unique @db.VarChar(128)
 
   // EMAIL VERIFIED:
   // - Seguridad: Crítico para evitar "Account Takeover".
@@ -66,7 +59,7 @@ model User {
   picture       String?   @db.VarChar(255)
   
   // ROLES Y ESTADO:
-  role          Role      @default(USER)
+  roles         Role[]    @relation("UserRoles")
   
   // Kill-Switch: Si false, el Guard rechaza cualquier request (Baneo rápido).
   isActive      Boolean   @default(true)
@@ -94,6 +87,24 @@ model User {
   @@map("users")
 }
 
+model Role {
+  id          String   @id @db.Uuid // UUIDv7
+  
+  // El nombre clave: "ADMIN", "USER", "SUPPORT"
+  name        String   @unique @db.VarChar(50)
+  
+  // Descripción humana: "Administrador con acceso total"
+  description String?  @db.VarChar(255)
+
+  // Relación inversa
+  users       User[]   @relation("UserRoles")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("roles")
+}
+
 model UserSecurity {
   id              String    @id @db.Uuid
 
@@ -109,7 +120,7 @@ model UserSecurity {
   // PASSWORD:
   // - Nullable (?): Permite usuarios que SOLO entran con Google/Apple.
   // - Lógica: Si tiene valor, el usuario puede hacer login local.
-  password      String?   @db.VarChar(255)
+  password      String?   @db.VarChar(128)
   
   // ZOMBIE KILLER (Seguridad):
   // - Qué es: Fecha en que se cambió la contraseña por última vez.
